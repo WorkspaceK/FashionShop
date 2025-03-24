@@ -149,6 +149,14 @@ class CheckOutService
         $fromDistrict = "1530";
         $shopId = "3577591";
         $toDistrict = Auth::user()->address->district;
+
+        // Kiểm tra địa chỉ người dùng
+        if (!Auth::user()->address || !$toDistrict || !Auth::user()->address->ward) {
+            \Log::error('Địa chỉ người dùng không đầy đủ');
+            return 0;
+        }
+
+        // API 1: Lấy dịch vụ khả dụng
         $response = Http::withHeaders([
             'token' => '24d5b95c-7cde-11ed-be76-3233f989b8f3'
         ])->get('https://online-gateway.ghn.vn/shiip/public-api/v2/shipping-order/available-services', [
@@ -156,8 +164,21 @@ class CheckOutService
             "from_district" => $fromDistrict,
             "to_district" => $toDistrict,
         ]);
-        $serviceId = $response['data'][0]['service_id'];
 
+        if ($response->failed()) {
+            \Log::error('API dịch vụ thất bại:', $response->json());
+            return 0;
+        }
+
+        $responseData = $response->json();
+        if (empty($responseData['data']) || !isset($responseData['data'][0]['service_id'])) {
+            \Log::warning('API dịch vụ không có service_id:', $responseData);
+            return 0;
+        }
+
+        $serviceId = $responseData['data'][0]['service_id'];
+
+        // API 2: Tính phí
         $dataGetFee = [
             "service_id" => $serviceId,
             "insurance_value" => 500000,
@@ -170,12 +191,23 @@ class CheckOutService
             "weight" => 1000,
             "width" => 15
         ];
+
         $response = Http::withHeaders([
             'token' => '24d5b95c-7cde-11ed-be76-3233f989b8f3'
         ])->get('https://online-gateway.ghn.vn/shiip/public-api/v2/shipping-order/fee', $dataGetFee);
-        \Log::info('GHN Fee API Response:', $response->json());
 
-        return $response['data']['total'];
+        if ($response->failed()) {
+            \Log::error('API phí thất bại:', $response->json());
+            return 0;
+        }
+
+        $responseData = $response->json();
+        if (empty($responseData['data']) || !isset($responseData['data']['total'])) {
+            \Log::warning('API phí không có total:', $responseData);
+            return 0;
+        }
+
+        return $responseData['data']['total'];
     }
 
     public function callbackMomo(Request $request)
